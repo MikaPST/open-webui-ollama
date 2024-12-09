@@ -2,11 +2,11 @@
 # Script Name   : script_install.ps1
 # Description   : Ce script automatise l'installation et la configuration d'Open-WebUI avec Ollama,
 #                 en vérifiant les prérequis comme Docker et Ollama, en installant ou mettant à jour
-#                 ces composants si nécessaire, en téléchargeant les modèles requis,
+#                 ces composants si nécessaire, en proposant de télécharger des modèles LLM,
 #                 et en démarrant un conteneur Docker pour l'application Open-WebUI.
 # Author        : Michael PASTOR
-# Last Modified : 2024/12/02
-# Version       : 1.0
+# Last Modified : 2024/12/09
+# Version       : 1.1
 # License       : Apache 2.0
 # -------------------------------------------------------------------------
 
@@ -92,24 +92,96 @@ if (-not $ollamaReady) {
 Write-Host "Ollama est operationnel !" -ForegroundColor Green
 
 # Etape 3 : Telechargement des modeles
-Function DownloadModel($modelName) {
-    Write-Host "Voulez-vous telecharger le modele $modelName ? (Y/N)" -ForegroundColor Cyan
-    $response = Read-Host
-    if ($response -eq "Y" -or $response -eq "y") {
-        Write-Host "Telechargement du modele $modelName en cours..." -ForegroundColor Yellow
-        & ollama pull $modelName
-        if ($?) {
-            Write-Host "Modele $modelName telecharge avec succes." -ForegroundColor Green
-        } else {
-            Write-Host "Echec du telechargement du modele $modelName." -ForegroundColor Red
+# Fonction pour afficher le menu interactif
+Function ShowMenu {
+    param (
+        [array]$models # Liste des modèles disponibles
+    )
+    # Table associative pour suivre les sélections de l'utilisateur
+    $selections = @{}
+
+    # Initialiser toutes les options comme non sélectionnées
+    foreach ($model in $models) {
+        $selections[$model.DisplayName] = $false
+    }
+
+    while ($true) {
+        # Nettoyer la console avant d'afficher le menu
+        Clear-Host
+        for ($i = 0; $i -lt 20; $i++) { Write-Host "" } # Ajouter des lignes vides pour nettoyer visuellement
+
+        Write-Host "Quels modèles LLM souhaitez-vous installer ?" -ForegroundColor Cyan
+        Write-Host "(Appuyez sur les touches correspondantes pour cocher ou décocher les modèles)"
+        Write-Host ""
+        
+        # Afficher les options avec l'état actuel (coché ou non)
+        $i = 1
+        foreach ($model in $models) {
+            $status = if ($selections[$model.DisplayName]) { "[x]" } else { "[ ]" }
+            Write-Host "$i. $status $($model.DisplayName) [$($model.Size)]" -ForegroundColor Yellow
+            $i++
         }
-    } else {
-        Write-Host "Modele $modelName ignore." -ForegroundColor Yellow
+
+        Write-Host ""
+        Write-Host "Actions disponibles :"
+        Write-Host "Taper un numéro pour basculer la sélection d'un modèle."
+        Write-Host "Taper 'S' pour valider les choix et démarrer le téléchargement."
+        Write-Host "Taper 'Q' pour quitter sans rien installer."
+
+        # Lire l'entrée utilisateur
+        $choice = Read-Host "Votre choix"
+
+        if ($choice -match '^\d+$') {
+            # Basculer l'état de sélection du modèle correspondant
+            $index = [int]$choice - 1
+            if ($index -ge 0 -and $index -lt $models.Count) {
+                $modelName = $models[$index].DisplayName
+                $selections[$modelName] = -not $selections[$modelName]
+            } else {
+                Write-Host "Choix invalide. Essayez de nouveau." -ForegroundColor Red
+                Start-Sleep -Seconds 1
+            }
+        } elseif ($choice -match '^[Ss]$') {
+            # Valider et retourner les sélections
+            return $models | Where-Object { $selections[$_.DisplayName] } # Filtrer uniquement les modèles sélectionnés
+        } elseif ($choice -match '^[Qq]$') {
+            Write-Host "Aucune installation effectuée. Script terminé." -ForegroundColor Yellow
+            exit
+        } else {
+            Write-Host "Entrée invalide. Essayez de nouveau." -ForegroundColor Red
+            Start-Sleep -Seconds 1
+        }
     }
 }
 
-DownloadModel "llama3.1"
-DownloadModel "mistral"
+# Fonction pour télécharger un modèle
+Function DownloadModel {
+    param (
+        [string]$modelName
+    )
+    Write-Host "Téléchargement du modèle $modelName en cours..." -ForegroundColor Yellow
+    & ollama pull $modelName
+    if ($?) {
+        Write-Host "Modèle $modelName téléchargé avec succès." -ForegroundColor Green
+    } else {
+        Write-Host "Échec du téléchargement du modèle $modelName." -ForegroundColor Red
+    }
+}
+
+# Liste des modèles disponibles
+$models = @(
+    @{ DisplayName = "Llama3.1 (8b)"; ActualName = "llama3.1"; Size = "8.0GB" },
+    @{ DisplayName = "Mistral (7b)"; ActualName = "mistral"; Size = "4.1GB" },
+    @{ DisplayName = "Qwen (7.6b)"; ActualName = "qwen2"; Size = "4.4GB" }
+)
+
+# Afficher le menu et obtenir les choix de l'utilisateur
+$selectedModels = ShowMenu -models $models
+
+# Téléchargement des modèles sélectionnés
+foreach ($selectedModel in $selectedModels) {
+    DownloadModel -modelName $selectedModel.ActualName
+}
 
 # Etape 4 : Demarrage du conteneur Docker pour Open-WebUI
 Write-Host "Demarrage du conteneur Open-WebUI..." -ForegroundColor Yellow
